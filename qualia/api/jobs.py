@@ -77,6 +77,136 @@ class JobManager:
                 self._cleanup_temp_files(job)
             return len(expired_ids)
 
+    # --- Execution ---
+
+    async def submit(self, job_id: str, executor: callable) -> None:
+        """Submete um job single para execução."""
+        if not self._try_acquire_slot(job_id, ("single", executor)):
+            return  # fica pending na fila
+        asyncio.create_task(self._run_single(job_id, executor))
+
+    async def submit_pipeline(self, job_id: str, executors: list[callable]) -> None:
+        """Submete um pipeline job para execução."""
+        if not self._try_acquire_slot(job_id, ("pipeline", executors)):
+            return
+        asyncio.create_task(self._run_pipeline(job_id, executors))
+
+    def _try_acquire_slot(self, job_id: str, entry: tuple) -> bool:
+        """Tenta adquirir um slot de execução. Retorna False se cheio."""
+        with self._lock:
+            running_count = sum(
+                1 for j in self._jobs.values() if j.status == JobStatus.running
+            )
+            if running_count >= self._max_concurrent:
+                self._pending_queue.append((job_id, entry))
+                return False
+            job = self._jobs.get(job_id)
+            if job:
+                job.status = JobStatus.running
+                job.started_at = datetime.now(timezone.utc)
+            return True
+
+    async def _run_single(self, job_id: str, executor: callable) -> None:
+        """Executa um job single em background thread."""
+        try:
+            result = await asyncio.to_thread(executor, job_id)
+            with self._lock:
+                job = self._jobs.get(job_id)
+                if job:
+                    job.status = JobStatus.completed
+                    job.result = result
+                    job.progress = 1.0
+                    job.completed_at = datetime.now(timezone.utc)
+        except Exception as e:
+            with self._lock:
+                job = self._jobs.get(job_id)
+                if job:
+                    job.status = JobStatus.failed
+                    job.error = str(e)
+                    job.completed_at = datetime.now(timezone.utc)
+        finally:
+            await self._notify_job(job_id)
+            await self._process_pending_queue()
+            self._cleanup_temp_files_if_terminal(job_id)
+
+    async def _run_pipeline(self, job_id: str, executors: list[callable]) -> None:
+        """Executa pipeline steps sequencialmente."""
+        try:
+            with self._lock:
+                job = self._jobs.get(job_id)
+                if not job:
+                    return
+
+            for i, executor in enumerate(executors):
+                with self._lock:
+                    job = self._jobs[job_id]
+                    job.current_step = i
+                    job.steps[i].status = JobStatus.running
+                await self._notify_job(job_id)
+
+                try:
+                    result = await asyncio.to_thread(executor, job_id)
+                    with self._lock:
+                        job.steps[i].status = JobStatus.completed
+                        job.steps[i].result = result
+                        job.update_progress()
+                except Exception as e:
+                    with self._lock:
+                        job.steps[i].status = JobStatus.failed
+                        job.steps[i].error = str(e)
+                        job.status = JobStatus.failed
+                        job.error = f"Step {i} ({job.steps[i].plugin_id}): {e}"
+                        job.completed_at = datetime.now(timezone.utc)
+                    await self._notify_job(job_id)
+                    return
+
+            with self._lock:
+                job.status = JobStatus.completed
+                job.progress = 1.0
+                job.result = {
+                    "steps_executed": len(executors),
+                    "results": [
+                        {"plugin_id": s.plugin_id, "result": s.result}
+                        for s in job.steps
+                    ],
+                }
+                job.completed_at = datetime.now(timezone.utc)
+        finally:
+            await self._notify_job(job_id)
+            await self._process_pending_queue()
+            self._cleanup_temp_files_if_terminal(job_id)
+
+    async def _process_pending_queue(self) -> None:
+        """Inicia o próximo job pendente válido se há slot disponível."""
+        with self._lock:
+            running_count = sum(
+                1 for j in self._jobs.values() if j.status == JobStatus.running
+            )
+            if running_count >= self._max_concurrent:
+                return
+            # Procura o próximo job válido (pula cancelados/expirados)
+            while self._pending_queue:
+                job_id, entry = self._pending_queue.pop(0)
+                job = self._jobs.get(job_id)
+                if job and job.status == JobStatus.pending:
+                    job.status = JobStatus.running
+                    job.started_at = datetime.now(timezone.utc)
+                    break
+            else:
+                return  # fila vazia ou sem jobs válidos
+
+        kind, executor_or_executors = entry
+        if kind == "pipeline":
+            asyncio.create_task(self._run_pipeline(job_id, executor_or_executors))
+        else:
+            asyncio.create_task(self._run_single(job_id, executor_or_executors))
+
+    def _cleanup_temp_files_if_terminal(self, job_id: str) -> None:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job and job.status.is_terminal:
+                self._cleanup_temp_files(job)
+
     def _cleanup_temp_files(self, job: Job) -> None:
         for path in job.temp_files:
             try:
