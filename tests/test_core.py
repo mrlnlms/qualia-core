@@ -60,7 +60,7 @@ class TestQualiaCore:
         expected_plugins = {
             'word_frequency', 'sentiment_analyzer', 'teams_cleaner',
             'wordcloud_d3', 'frequency_chart_plotly', 'sentiment_viz_plotly',
-            'readability_analyzer', 'transcription'
+            'readability_analyzer', 'transcription', 'transcription_local'
         }
         
         assert set(plugins.keys()) == expected_plugins
