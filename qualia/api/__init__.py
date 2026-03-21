@@ -8,6 +8,7 @@ Lógica de endpoints em qualia/api/routes/.
 from dotenv import load_dotenv
 load_dotenv()
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -34,9 +35,23 @@ async def lifespan(app_instance):
         manager = JobManager(max_concurrent=max_concurrent)
         set_job_manager(manager)
 
+    # Background cleanup task
+    async def periodic_cleanup():
+        while True:
+            await asyncio.sleep(300)  # 5 min
+            try:
+                removed = get_job_manager().cleanup_expired()
+                if removed:
+                    logging.getLogger("qualia.api").info("Cleaned up %d expired jobs", removed)
+            except Exception as e:
+                logging.getLogger("qualia.api").error("Job cleanup error: %s", e)
+
+    cleanup_task = asyncio.create_task(periodic_cleanup())
+
     yield
 
-    # Shutdown: cleanup
+    # Shutdown: cancel cleanup + final cleanup
+    cleanup_task.cancel()
     try:
         get_job_manager().cleanup_expired()
     except RuntimeError:
