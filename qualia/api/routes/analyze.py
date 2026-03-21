@@ -5,16 +5,23 @@ import hashlib
 import asyncio
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
+from starlette.responses import JSONResponse
 
-from qualia.api.deps import get_core, track, validate_plugin_config, require_plugin_type, check_upload_size
+from qualia.api.deps import get_core, get_job_manager, track, validate_plugin_config, require_plugin_type, check_upload_size
+from qualia.api.routing import should_run_async
 from qualia.api.schemas import AnalyzeRequest
 
 router = APIRouter()
 
 
 @router.post("/analyze/{plugin_id}")
-async def analyze(plugin_id: str, request: AnalyzeRequest):
+async def analyze(
+    plugin_id: str,
+    request: AnalyzeRequest,
+    sync: bool = Query(False, alias="sync"),
+    async_mode: bool = Query(False, alias="async"),
+):
     """Execute an analyzer plugin on text"""
     core = get_core()
     require_plugin_type(core, plugin_id, "analyzer")
@@ -22,6 +29,31 @@ async def analyze(plugin_id: str, request: AnalyzeRequest):
         validate_plugin_config(core, plugin_id, request.config)
 
         doc = core.add_document(f"api_{plugin_id}_{hashlib.md5(request.text.encode()).hexdigest()[:8]}", request.text)
+
+        plugin = core.loader.get_plugin(plugin_id)
+        meta = plugin.meta() if plugin else None
+        if should_run_async(meta, sync_override=sync, async_override=async_mode, is_pipeline=False):
+            manager = get_job_manager()
+            from qualia.core.jobs import Job
+            job = Job.create_single(plugin_id=plugin_id)
+            manager.store(job)
+
+            def executor(job_id):
+                return core.execute_plugin(plugin_id, doc, request.config, request.context)
+
+            import asyncio as _asyncio
+            _asyncio.get_event_loop().create_task(manager.submit(job.id, executor))
+            await track(f"/analyze/{plugin_id}", plugin_id, "async")
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "job_id": job.id,
+                    "status": "pending",
+                    "status_url": f"/jobs/{job.id}",
+                    "stream_url": f"/jobs/{job.id}/stream",
+                }
+            )
+
         try:
             result = await asyncio.wait_for(
                 asyncio.to_thread(core.execute_plugin, plugin_id, doc, request.config, request.context),
