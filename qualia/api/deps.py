@@ -27,6 +27,20 @@ def get_core() -> QualiaCore:
     return _core
 
 
+_job_manager: "JobManager | None" = None
+
+
+def set_job_manager(manager: "JobManager") -> None:
+    global _job_manager
+    _job_manager = manager
+
+
+def get_job_manager() -> "JobManager":
+    if _job_manager is None:
+        raise RuntimeError("JobManager not initialized")
+    return _job_manager
+
+
 def set_extensions(available: bool):
     global HAS_EXTENSIONS
     HAS_EXTENSIONS = available
