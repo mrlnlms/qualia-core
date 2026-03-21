@@ -66,4 +66,23 @@ class TranscriptionLocalPlugin(BaseDocumentPlugin):
         self, document: Document, config: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Transcreve o arquivo referenciado em document.metadata['file_path']."""
-        raise NotImplementedError("Implementação pendente")
+
+        # Validar file_path
+        file_path = document.metadata.get("file_path")
+        if not file_path:
+            raise ValueError(
+                "Nenhum arquivo fornecido. Use o endpoint /transcribe com upload de arquivo."
+            )
+
+        file_path = Path(file_path)
+        if not file_path.exists():
+            raise ValueError(f"Arquivo não encontrado: {file_path}")
+
+        # Verificar dependência
+        if not HAS_PYWHISPERCPP:
+            raise ValueError(
+                "pywhispercpp não instalado. Execute: pip install qualia-core[transcription-local]"
+            )
+
+        # Transcrição (implementação no próximo task)
+        raise NotImplementedError("Transcrição pendente")
