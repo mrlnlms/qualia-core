@@ -549,7 +549,7 @@ class JobManager:
         self._jobs: dict[str, Job] = {}
         self._lock = threading.Lock()
         self._max_concurrent = max_concurrent
-        self._pending_queue: list[tuple[str, callable]] = []  # (job_id, executor)
+        self._pending_queue: list[tuple[str, tuple]] = []  # (job_id, ("single"|"pipeline", executor(s)))
         self._streams: dict[str, set[asyncio.Queue]] = {}
         self._streams_lock = asyncio.Lock()
 
@@ -593,6 +593,10 @@ class JobManager:
                 return False
             job.status = JobStatus.cancelled
             job.completed_at = datetime.now(timezone.utc)
+            # Remove da fila de pendentes se estiver lá
+            self._pending_queue = [
+                (jid, entry) for jid, entry in self._pending_queue if jid != job_id
+            ]
             self._cleanup_temp_files(job)
             return True
 
@@ -884,19 +888,23 @@ Add to `qualia/api/jobs.py`:
             self._cleanup_temp_files_if_terminal(job_id)
 
     async def _process_pending_queue(self) -> None:
-        """Inicia o próximo job pendente se há slot disponível."""
+        """Inicia o próximo job pendente válido se há slot disponível."""
         with self._lock:
             running_count = sum(
                 1 for j in self._jobs.values() if j.status == JobStatus.running
             )
-            if running_count >= self._max_concurrent or not self._pending_queue:
+            if running_count >= self._max_concurrent:
                 return
-            job_id, entry = self._pending_queue.pop(0)
-            job = self._jobs.get(job_id)
-            if not job or job.status != JobStatus.pending:
-                return
-            job.status = JobStatus.running
-            job.started_at = datetime.now(timezone.utc)
+            # Procura o próximo job válido (pula cancelados/expirados)
+            while self._pending_queue:
+                job_id, entry = self._pending_queue.pop(0)
+                job = self._jobs.get(job_id)
+                if job and job.status == JobStatus.pending:
+                    job.status = JobStatus.running
+                    job.started_at = datetime.now(timezone.utc)
+                    break
+            else:
+                return  # fila vazia ou sem jobs válidos
 
         kind, executor_or_executors = entry
         if kind == "pipeline":
@@ -1443,18 +1451,25 @@ from contextlib import asynccontextmanager
 
 @asynccontextmanager
 async def lifespan(app):
-    # Startup: init JobManager
+    # Startup: init JobManager (só se não foi setado por um test fixture)
     from qualia.api.jobs import JobManager
-    from qualia.api.deps import set_job_manager
+    from qualia.api.deps import get_job_manager, set_job_manager
     import os
-    max_concurrent = int(os.environ.get("QUALIA_MAX_CONCURRENT_HEAVY_JOBS", "1"))
-    manager = JobManager(max_concurrent=max_concurrent)
-    set_job_manager(manager)
+    try:
+        get_job_manager()
+        # Já inicializado (ex: por test fixture) — não sobrescrever
+    except RuntimeError:
+        max_concurrent = int(os.environ.get("QUALIA_MAX_CONCURRENT_HEAVY_JOBS", "1"))
+        manager = JobManager(max_concurrent=max_concurrent)
+        set_job_manager(manager)
 
     yield
 
     # Shutdown: cleanup
-    manager.cleanup_expired()
+    try:
+        get_job_manager().cleanup_expired()
+    except RuntimeError:
+        pass
 ```
 
 2. Pass lifespan to FastAPI: `app = FastAPI(..., lifespan=lifespan)`
@@ -1677,6 +1692,30 @@ Apply the same pattern from Task 8 to each endpoint. The key differences:
 - Submits via `manager.submit_pipeline()`.
 - Must handle file uploads + accumulated_data pattern.
 
+**Text chaining between pipeline steps (critical):**
+
+The current `pipeline.py` does text chaining at the route level: each step's output feeds the next step's input via `extract_chained_text()`. When async, this logic moves inside `_run_pipeline`. The executors need to be built as a chain — each executor closure captures the `accumulated_data` dict (mutable, shared) and uses `extract_chained_text()` to read the previous step's output. Pattern:
+
+```python
+# Inside pipeline.py async path — building executor closures
+accumulated_data = {}
+
+def make_step_executor(step, accumulated_data):
+    def executor(job_id):
+        # Texto vem do step anterior via chaining
+        chained_text = extract_chained_text(accumulated_data) if accumulated_data else initial_text
+        doc = Document(id=f"pipeline_{plugin_id}_{hash}", content=chained_text, metadata={})
+        result = core.execute_plugin(step.plugin_id, doc, step.config or {})
+        # Acumula para o próximo step
+        accumulated_data.update(result)
+        return result
+    return executor
+
+executors = [make_step_executor(step, accumulated_data) for step in steps]
+```
+
+This preserves the existing chaining behavior while running inside `_run_pipeline`.
+
 - [ ] **Step 1: Write failing tests for each endpoint**
 
 Append to `tests/test_async_routing.py`:
@@ -1815,13 +1854,16 @@ In the `lifespan` context manager in `__init__.py`, add a background task that r
 ```python
 @asynccontextmanager
 async def lifespan(app):
-    # Startup
+    # Startup (guarded — test fixtures podem setar antes)
     from qualia.api.jobs import JobManager
-    from qualia.api.deps import set_job_manager
+    from qualia.api.deps import get_job_manager, set_job_manager
     import os
-    max_concurrent = int(os.environ.get("QUALIA_MAX_CONCURRENT_HEAVY_JOBS", "1"))
-    manager = JobManager(max_concurrent=max_concurrent)
-    set_job_manager(manager)
+    try:
+        manager = get_job_manager()
+    except RuntimeError:
+        max_concurrent = int(os.environ.get("QUALIA_MAX_CONCURRENT_HEAVY_JOBS", "1"))
+        manager = JobManager(max_concurrent=max_concurrent)
+        set_job_manager(manager)
 
     # Background cleanup task
     async def periodic_cleanup():
@@ -2053,7 +2095,13 @@ export async function executeWithJobSupport(url, options = {}, { onProgress } = 
         }, 3000);
       };
 
-      eventSource.addEventListener('progress', (e) => {
+      // Backend emite: 'status', 'step', 'completed' (spec-aligned)
+      eventSource.addEventListener('status', (e) => {
+        const data = JSON.parse(e.data);
+        if (onProgress) onProgress(data);
+      });
+
+      eventSource.addEventListener('step', (e) => {
         const data = JSON.parse(e.data);
         if (onProgress) onProgress(data);
       });
@@ -2061,13 +2109,12 @@ export async function executeWithJobSupport(url, options = {}, { onProgress } = 
       eventSource.addEventListener('completed', (e) => {
         const data = JSON.parse(e.data);
         eventSource.close();
-        resolve(data.result);
-      });
-
-      eventSource.addEventListener('failed', (e) => {
-        const data = JSON.parse(e.data);
-        eventSource.close();
-        reject(new Error(data.error || 'Job failed'));
+        if (data.status === 'completed') {
+          resolve(data.result);
+        } else {
+          // failed ou cancelled — backend envia todos os terminais como 'completed' event
+          reject(new Error(data.error || `Job ${data.status}`));
+        }
       });
 
       eventSource.onerror = () => {
