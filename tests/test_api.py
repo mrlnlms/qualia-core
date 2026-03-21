@@ -153,7 +153,7 @@ class TestPipelineEndpoints:
         """Testa pipeline simples"""
         import json as _json
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={
                 "text": sample_text,
                 "steps": _json.dumps([
@@ -173,7 +173,7 @@ class TestPipelineEndpoints:
         """Testa pipeline com configurações"""
         import json as _json
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={
                 "text": "Texto para análise complexa",
                 "steps": _json.dumps([
@@ -197,7 +197,7 @@ class TestPipelineEndpoints:
         """Testa pipeline vazio"""
         import json as _json
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={"text": sample_text, "steps": _json.dumps([])}
         )
         assert response.status_code == 422
@@ -257,7 +257,7 @@ class TestErrorHandling:
         """Testa tratamento de erro do servidor"""
         import json as _json
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={
                 "text": "teste",
                 "steps": _json.dumps([{"plugin_id": "plugin_que_nao_existe"}])

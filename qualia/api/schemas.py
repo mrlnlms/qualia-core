@@ -37,6 +37,7 @@ class PluginInfo(BaseModel):
     provides: List[str]
     requires: List[str]
     parameters: Dict[str, Any]
+    heavy: bool
 
 
 def plugin_to_info(plugin_id: str) -> PluginInfo:
@@ -55,5 +56,6 @@ def plugin_to_info(plugin_id: str) -> PluginInfo:
         version=meta.version,
         provides=meta.provides,
         requires=meta.requires,
-        parameters=meta.parameters
+        parameters=meta.parameters,
+        heavy=meta.heavy
     )

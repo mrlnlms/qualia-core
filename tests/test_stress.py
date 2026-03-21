@@ -331,7 +331,7 @@ class TestAPIStress:
                 "text": f"Texto mix {i} para teste de carga.",
                 "config": {},
             }))
-            tasks.append(ac.post("/pipeline", data={
+            tasks.append(ac.post("/pipeline?sync=true", data={
                 "steps": '[{"plugin_id": "word_frequency", "config": {}}]',
                 "text": f"Pipeline mix {i} para teste.",
             }))
@@ -347,8 +347,8 @@ class TestAPIStress:
             ac.post("/analyze/nonexistent_plugin", json={"text": "t", "config": {}}),
             ac.post("/analyze/word_frequency", json={"text": "", "config": {}}),
             ac.post("/analyze/word_frequency", json={"text": "t", "config": "bad"}),
-            ac.post("/pipeline", data={"steps": "invalid json", "text": "t"}),
-            ac.post("/pipeline", data={"steps": "[]", "text": "t"}),
+            ac.post("/pipeline?sync=true", data={"steps": "invalid json", "text": "t"}),
+            ac.post("/pipeline?sync=true", data={"steps": "[]", "text": "t"}),
             ac.post("/visualize/word_frequency", json={"data": {}, "config": {}}),
         ]
         responses = await asyncio.gather(*bad_requests, return_exceptions=True)
@@ -737,7 +737,7 @@ class TestPipelineInvalidSequences:
     async def test_visualizer_first_step_no_data(self, ac):
         """Visualizer como primeiro step (sem dados) → 422."""
         steps = json.dumps([{"plugin_id": "wordcloud_d3", "config": {}}])
-        resp = await ac.post("/pipeline", data={"text": "texto", "steps": steps})
+        resp = await ac.post("/pipeline?sync=true", data={"text": "texto", "steps": steps})
         assert resp.status_code == 422
 
     @pytest.mark.asyncio
@@ -748,7 +748,7 @@ class TestPipelineInvalidSequences:
             {"plugin_id": "wordcloud_d3", "config": {}},
             {"plugin_id": "frequency_chart_plotly", "config": {}},
         ])
-        resp = await ac.post("/pipeline", data={
+        resp = await ac.post("/pipeline?sync=true", data={
             "text": "gato gato cachorro pato gato",
             "steps": steps,
         })
@@ -762,7 +762,7 @@ class TestPipelineInvalidSequences:
             {"plugin_id": "word_frequency", "config": {}},
             {"plugin_id": "teams_cleaner", "config": {}},
         ])
-        resp = await ac.post("/pipeline", data={
+        resp = await ac.post("/pipeline?sync=true", data={
             "text": "[10:00:00] Ana: Olá pessoal",
             "steps": steps,
         })
@@ -776,7 +776,7 @@ class TestPipelineInvalidSequences:
             {"plugin_id": "word_frequency", "config": {}},
             {"plugin_id": "wordcloud_d3", "config": {"output_format": "pdf"}},
         ])
-        resp = await ac.post("/pipeline", data={
+        resp = await ac.post("/pipeline?sync=true", data={
             "text": "gato cachorro pato",
             "steps": steps,
         })
@@ -786,7 +786,7 @@ class TestPipelineInvalidSequences:
     async def test_empty_text_through_pipeline(self, ac):
         """Texto vazio pelo pipeline inteiro — não crasheia."""
         steps = json.dumps([{"plugin_id": "word_frequency", "config": {}}])
-        resp = await ac.post("/pipeline", data={"text": "", "steps": steps})
+        resp = await ac.post("/pipeline?sync=true", data={"text": "", "steps": steps})
         # Pode ser 200 (resultado vazio) ou 422 — nunca 500
         assert resp.status_code != 500
 
@@ -798,7 +798,7 @@ class TestPipelineInvalidSequences:
             {"plugin_id": "teams_cleaner", "config": {}},
             {"plugin_id": "word_frequency", "config": {}},
         ])
-        resp = await ac.post("/pipeline",
+        resp = await ac.post("/pipeline?sync=true",
             files={"file": ("meeting.txt", transcript.encode(), "text/plain")},
             data={"steps": steps},
         )
@@ -818,7 +818,7 @@ class TestPipelineInvalidSequences:
             {"plugin_id": "sentiment_analyzer", "config": {}},
             {"plugin_id": "readability_analyzer", "config": {}},
         ])
-        resp = await ac.post("/pipeline", data={
+        resp = await ac.post("/pipeline?sync=true", data={
             "text": "Texto positivo e bom para análise completa com múltiplas palavras.",
             "steps": steps,
         })

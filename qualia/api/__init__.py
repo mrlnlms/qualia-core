@@ -8,22 +8,62 @@ Lógica de endpoints em qualia/api/routes/.
 from dotenv import load_dotenv
 load_dotenv()
 
+import asyncio
 import logging
+import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pathlib import Path
 
-import os
-
 from qualia.core import QualiaCore
 from qualia.api.deps import set_core, set_extensions
+
+
+@asynccontextmanager
+async def lifespan(app_instance):
+    # Startup: init JobManager (só se não foi setado por um test fixture)
+    from qualia.api.jobs import JobManager
+    from qualia.api.deps import get_job_manager, set_job_manager
+    try:
+        get_job_manager()
+        # Já inicializado (ex: por test fixture)
+    except RuntimeError:
+        max_concurrent = int(os.environ.get("QUALIA_MAX_CONCURRENT_HEAVY_JOBS", "1"))
+        manager = JobManager(max_concurrent=max_concurrent)
+        set_job_manager(manager)
+
+    # Background cleanup task
+    async def periodic_cleanup():
+        while True:
+            await asyncio.sleep(300)  # 5 min
+            try:
+                removed = get_job_manager().cleanup_expired()
+                if removed:
+                    logging.getLogger("qualia.api").info("Cleaned up %d expired jobs", removed)
+            except Exception as e:
+                logging.getLogger("qualia.api").error("Job cleanup error: %s", e)
+
+    cleanup_task = asyncio.create_task(periodic_cleanup())
+
+    yield
+
+    # Shutdown: cancel cleanup + final cleanup
+    cleanup_task.cancel()
+    try:
+        get_job_manager().cleanup_expired()
+    except RuntimeError:
+        pass
+
 
 # App
 app = FastAPI(
     title="Qualia Core API",
     description="REST API for Qualia Core - Análise Qualitativa Framework",
-    version="0.2.0-beta"
+    version="0.2.0-beta",
+    lifespan=lifespan,
 )
 
 _cors_origins = os.getenv("CORS_ALLOWED_ORIGINS", "*")
@@ -72,6 +112,9 @@ app.include_router(visualize_router)
 app.include_router(pipeline_router)
 app.include_router(config_router)
 app.include_router(transcribe_router)
+
+from qualia.api.routes.jobs import router as jobs_router
+app.include_router(jobs_router)
 
 
 # Exception handlers

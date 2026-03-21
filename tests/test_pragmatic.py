@@ -160,7 +160,7 @@ class TestPipelineFlexibility:
     def test_pipeline_passes_data_between_plugins(self, client):
         """Pipeline passa dados entre plugins sem forçar estrutura"""
         import json as _json
-        response = client.post("/pipeline", data={
+        response = client.post("/pipeline?sync=true", data={
             "text": "Texto para análise",
             "steps": _json.dumps([
                 {"plugin_id": "word_frequency"},

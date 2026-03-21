@@ -24,6 +24,17 @@ def pytest_sessionfinish(session, exitstatus):
             shutil.rmtree(path)
 
 
+@pytest.fixture(autouse=True)
+def _ensure_job_manager():
+    """Garante que JobManager está inicializado para todos os testes."""
+    from qualia.api.deps import get_job_manager, set_job_manager
+    try:
+        get_job_manager()
+    except RuntimeError:
+        from qualia.api.jobs import JobManager
+        set_job_manager(JobManager(max_concurrent=2))
+
+
 @pytest.fixture
 def client():
     """Cliente de teste para a API"""

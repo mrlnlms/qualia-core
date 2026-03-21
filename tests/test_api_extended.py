@@ -516,7 +516,7 @@ class TestPipelineEndpoint:
     def test_pipeline_invalid_json_steps(self, client):
         """Steps com JSON invalido retorna 422"""
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={"text": "algo", "steps": "nao e json"},
         )
         assert response.status_code == 422
@@ -525,7 +525,7 @@ class TestPipelineEndpoint:
         """Pipeline sem texto e sem arquivo retorna 422"""
         steps = json.dumps([{"plugin_id": "word_frequency"}])
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={"steps": steps},
         )
         # Sem text e sem file -> text="" que e falsy -> 422
@@ -539,7 +539,7 @@ class TestPipelineEndpoint:
         ])
         text = "palavra repetida repetida tres tres tres quatro quatro quatro quatro"
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={"text": text, "steps": steps},
         )
         assert response.status_code == 200
@@ -559,7 +559,7 @@ class TestPipelineEndpoint:
             }
         ])
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={"text": "qualquer texto", "steps": steps},
         )
         # min_word_length com valor nao-numerico -> 422 na validacao
@@ -571,7 +571,7 @@ class TestPipelineEndpoint:
             {"plugin_id": "frequency_chart_plotly"},
         ])
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={"text": "algo", "steps": steps},
         )
         # 422 porque visualizer precisa de resultado anterior
@@ -583,7 +583,7 @@ class TestPipelineEndpoint:
             {"plugin_id": "plugin_que_nao_existe"},
         ])
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={"text": "algo", "steps": steps},
         )
         assert response.status_code == 404
@@ -594,7 +594,7 @@ class TestPipelineEndpoint:
 
         with patch("qualia.api.routes.pipeline.asyncio.wait_for", side_effect=_asyncio.TimeoutError):
             response = client.post(
-                "/pipeline",
+                "/pipeline?sync=true",
                 data={
                     "text": "texto qualquer para pipeline",
                     "steps": json.dumps([{"plugin_id": "word_frequency", "config": {}}]),
@@ -610,7 +610,7 @@ class TestPipelineEndpoint:
             fake_audio = io.BytesIO(b"\x00" * 100)
             steps = json.dumps([{"plugin_id": "transcription"}])
             response = client.post(
-                "/pipeline",
+                "/pipeline?sync=true",
                 files={"file": ("audio.mp3", fake_audio, "audio/mpeg")},
                 data={"steps": steps},
             )
@@ -637,7 +637,7 @@ class TestPipelineEndpoint:
                 {"plugin_id": "frequency_chart_plotly"},
             ])
             response = client.post(
-                "/pipeline",
+                "/pipeline?sync=true",
                 data={"text": text, "steps": steps},
             )
         assert response.status_code == 504
@@ -645,7 +645,7 @@ class TestPipelineEndpoint:
     def test_pipeline_non_text_result_keeps_current_text(self, client):
         """Plugin que retorna dict sem campos de texto não altera current_text."""
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={
                 "text": "texto original para dois steps",
                 "steps": json.dumps([
@@ -900,7 +900,7 @@ class TestUploadSizeLimit:
         fake_content = b"\x00" * 1025
         steps = json.dumps([{"plugin_id": "teams_cleaner"}])
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             files={"file": ("big.txt", io.BytesIO(fake_content), "text/plain")},
             data={"steps": steps},
         )
@@ -1030,7 +1030,7 @@ class TestPipelineWithFile:
                 {"plugin_id": "word_frequency"},
             ])
             response = client.post(
-                "/pipeline",
+                "/pipeline?sync=true",
                 files={"file": ("audio.mp3", fake_audio, "audio/mpeg")},
                 data={"text": "", "steps": steps},
             )
@@ -1052,7 +1052,7 @@ class TestPipelineWithFile:
             "[00:00:03] Ana: palavra forte\n"
         )
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={"text": teams_text, "steps": steps},
         )
 
@@ -1075,7 +1075,7 @@ class TestPipelineWithFile:
                 {"plugin_id": "word_frequency"},
             ])
             response = client.post(
-                "/pipeline",
+                "/pipeline?sync=true",
                 files={"file": ("audio.mp3", fake_audio, "audio/mpeg")},
                 data={"steps": steps},
             )
@@ -1092,7 +1092,7 @@ class TestPipelineWithFile:
             fake_audio = io.BytesIO(b"\x00" * 100)
             steps = json.dumps([{"plugin_id": "transcription"}])
             response = client.post(
-                "/pipeline",
+                "/pipeline?sync=true",
                 files={"file": ("test.mp3", fake_audio, "audio/mpeg")},
                 data={"steps": steps},
             )
@@ -1105,7 +1105,7 @@ class TestPipelineWithFile:
         fake_audio = io.BytesIO(b"\x00" * 100)
         steps = json.dumps([{"plugin_id": "word_frequency"}])
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             files={"file": ("audio.mp3", fake_audio, "audio/mpeg")},
             data={"steps": steps},
         )
@@ -1133,7 +1133,7 @@ class TestPipelineWithFile:
             {"plugin_id": "word_frequency"},
         ])
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             files={"file": ("chat.txt", fake_file, "text/plain")},
             data={"steps": steps},
         )
@@ -1226,7 +1226,7 @@ class TestPipelineEdgeCases:
     def test_pipeline_empty_steps_returns_422(self, client):
         """Pipeline com lista de steps vazia retorna 422"""
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={"text": "algo", "steps": "[]"},
         )
         assert response.status_code == 422
@@ -1253,7 +1253,7 @@ class TestPipelineEdgeCases:
             mock_core.execute_plugin.side_effect = RuntimeError("plugin explodiu")
 
             response = client.post(
-                "/pipeline",
+                "/pipeline?sync=true",
                 data={"text": "algo", "steps": steps},
             )
 
@@ -1271,7 +1271,7 @@ class TestPipelineEdgeCases:
         text = "palavra repetida repetida tres tres tres quatro quatro quatro quatro"
 
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={"text": text, "steps": steps},
         )
         # Se o plugin nao suporta html, pode retornar 400; se suporta, 200
@@ -1289,7 +1289,7 @@ class TestPipelineEdgeCases:
         ])
         text = "palavra repetida repetida tres tres tres quatro quatro quatro quatro"
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={"text": text, "steps": steps},
         )
         # pdf nao suportado -> 422 (validação de output_format na borda)
@@ -1302,7 +1302,7 @@ class TestPipelineEdgeCases:
         ])
         text = "Este produto e excelente, estou muito satisfeito com a qualidade."
         response = client.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={"text": text, "steps": steps},
         )
         assert response.status_code == 200
@@ -1477,7 +1477,7 @@ class TestTranscribeEdgeCases:
 
             fake_audio = io.BytesIO(b"\x00" * 100)
             response = client.post(
-                "/transcribe/transcription",
+                "/transcribe/transcription?sync=true",
                 files={"file": ("audio.mp3", fake_audio, "audio/mpeg")},
                 data={"config": "{}"},
             )

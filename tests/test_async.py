@@ -78,7 +78,7 @@ class TestConcurrentRequests:
         for i in range(3):
             tasks.append(
                 ac.post(
-                    "/pipeline",
+                    "/pipeline?sync=true",
                     data={
                         "steps": '[{"plugin_id": "word_frequency", "config": {}}]',
                         "text": f"Texto número {i} para pipeline concorrente.",
@@ -163,7 +163,7 @@ class TestPipelineErrors:
     async def test_invalid_plugin_in_pipeline(self, ac):
         """Plugin inexistente no pipeline retorna 404"""
         resp = await ac.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={
                 "steps": '[{"plugin_id": "nonexistent_plugin", "config": {}}]',
                 "text": "Texto de teste.",
@@ -174,7 +174,7 @@ class TestPipelineErrors:
     async def test_invalid_steps_json(self, ac):
         """JSON inválido no campo steps retorna 422"""
         resp = await ac.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={"steps": "not valid json [[[", "text": "Teste"},
         )
         assert resp.status_code == 422
@@ -182,7 +182,7 @@ class TestPipelineErrors:
     async def test_empty_pipeline(self, ac):
         """Pipeline vazio retorna 422"""
         resp = await ac.post(
-            "/pipeline",
+            "/pipeline?sync=true",
             data={"steps": "[]", "text": "Teste"},
         )
         assert resp.status_code == 422
