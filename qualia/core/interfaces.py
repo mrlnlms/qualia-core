@@ -29,6 +29,7 @@ class PluginMetadata:
     can_use: List[str] = field(default_factory=list)
     accepts: List[str] = field(default_factory=list)
     parameters: Dict[str, Any] = field(default_factory=dict)
+    heavy: bool = False
 
     def get_dependencies(self) -> Set[str]:
         """Retorna todas as dependências (obrigatórias e opcionais)"""
