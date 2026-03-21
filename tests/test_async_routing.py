@@ -71,3 +71,83 @@ class TestAnalyzeAsyncRouting:
         assert "job_id" in data
         assert "status_url" in data
         assert "stream_url" in data
+
+
+class TestProcessAsyncRouting:
+    def test_process_sync_default(self, client):
+        """Document plugin leve sem override -> sync 200."""
+        resp = client.post("/process/teams_cleaner", json={
+            "text": "Some document text to process for analysis.",
+            "config": {},
+        })
+        assert resp.status_code == 200
+
+    def test_process_async_override(self, client):
+        """Document plugin com ?async=true -> 202 + job_id."""
+        resp = client.post("/process/teams_cleaner?async=true", json={
+            "text": "Some document text to process for analysis.",
+            "config": {},
+        })
+        assert resp.status_code == 202
+        data = resp.json()
+        assert "job_id" in data
+        assert "status_url" in data
+        assert "stream_url" in data
+
+    def test_process_sync_override_stays_sync(self, client):
+        """Document plugin com ?sync=true -> sync 200."""
+        resp = client.post("/process/teams_cleaner?sync=true", json={
+            "text": "Some document text to process for analysis.",
+            "config": {},
+        })
+        assert resp.status_code == 200
+
+
+class TestVisualizeAsyncRouting:
+    VIZ_DATA = {"word_frequencies": {"hello": 5, "world": 3, "test": 2}}
+
+    def test_visualize_sync_default(self, client):
+        """Visualizer leve sem override -> sync 200."""
+        resp = client.post("/visualize/wordcloud_d3", json={
+            "data": self.VIZ_DATA,
+            "config": {},
+            "output_format": "html",
+        })
+        assert resp.status_code == 200
+
+    def test_visualize_async_override(self, client):
+        """Visualizer com ?async=true -> 202 + job_id."""
+        resp = client.post("/visualize/wordcloud_d3?async=true", json={
+            "data": self.VIZ_DATA,
+            "config": {},
+            "output_format": "html",
+        })
+        assert resp.status_code == 202
+        data = resp.json()
+        assert "job_id" in data
+        assert "status_url" in data
+
+
+class TestPipelineAsyncRouting:
+    def test_pipeline_async_by_default(self, client):
+        """Pipeline sem parâmetros -> 202 (async por default)."""
+        resp = client.post("/pipeline", data={
+            "steps": '[{"plugin_id": "sentiment_analyzer"}]',
+            "text": "I love this product!",
+        })
+        assert resp.status_code == 202
+        data = resp.json()
+        assert "job_id" in data
+        assert "status_url" in data
+        assert "stream_url" in data
+
+    def test_pipeline_sync_override(self, client):
+        """Pipeline com ?sync=true -> 200 (sync, como antes)."""
+        resp = client.post("/pipeline?sync=true", data={
+            "steps": '[{"plugin_id": "sentiment_analyzer"}]',
+            "text": "I love this product!",
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "success"
+        assert data["steps_executed"] == 1

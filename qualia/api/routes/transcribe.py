@@ -4,9 +4,11 @@ import json
 import asyncio
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
+from starlette.responses import JSONResponse
 
-from qualia.api.deps import get_core, track, validate_plugin_config, require_plugin_type, check_upload_size
+from qualia.api.deps import get_core, get_job_manager, track, validate_plugin_config, require_plugin_type, check_upload_size
+from qualia.api.routing import should_run_async
 
 router = APIRouter()
 
@@ -19,6 +21,8 @@ async def transcribe(
     plugin_id: str,
     file: UploadFile = File(...),
     config: str = Form("{}"),
+    sync: bool = Query(False, alias="sync"),
+    async_mode: bool = Query(False, alias="async"),
 ):
     """Transcribe an audio/video file using a document plugin.
 
@@ -59,6 +63,31 @@ async def transcribe(
         doc.metadata["file_path"] = tmp_path
         doc.metadata["original_filename"] = file.filename
         doc.metadata["file_size"] = upload.size
+
+        if should_run_async(meta, sync_override=sync, async_override=async_mode, is_pipeline=False):
+            manager = get_job_manager()
+            from qualia.core.jobs import Job
+            job = Job.create_single(plugin_id=plugin_id, temp_files=[tmp_path])
+            manager.store(job)
+
+            def executor(job_id):
+                result = core.execute_plugin(plugin_id, doc, config_dict)
+                # Plugin retorna status: "error" para falhas de domínio
+                if isinstance(result, dict) and result.get("status") == "error":
+                    raise RuntimeError(result.get("error", "Erro na transcrição"))
+                return result
+
+            asyncio.get_event_loop().create_task(manager.submit(job.id, executor))
+            await track(f"/transcribe/{plugin_id}", plugin_id, "async")
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "job_id": job.id,
+                    "status": "pending",
+                    "status_url": f"/jobs/{job.id}",
+                    "stream_url": f"/jobs/{job.id}/stream",
+                }
+            )
 
         result = await asyncio.wait_for(
             asyncio.to_thread(core.execute_plugin, plugin_id, doc, config_dict),

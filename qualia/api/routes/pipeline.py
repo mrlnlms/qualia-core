@@ -8,9 +8,11 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
+from starlette.responses import JSONResponse
 
-from qualia.api.deps import get_core, track, validate_plugin_config, check_upload_size
+from qualia.api.deps import get_core, get_job_manager, track, validate_plugin_config, check_upload_size
+from qualia.api.routing import should_run_async
 from qualia.core.models import extract_chained_text
 
 router = APIRouter()
@@ -26,6 +28,8 @@ async def execute_pipeline(
     steps: str = Form(...),
     text: str = Form(None),
     file: UploadFile = File(None),
+    sync: bool = Query(False, alias="sync"),
+    async_mode: bool = Query(False, alias="async"),
 ):
     """Execute a pipeline of plugins.
 
@@ -133,6 +137,117 @@ async def execute_pipeline(
             raise HTTPException(status_code=422, detail="Pipeline requires text or file input")
 
         last_result = all_results[-1]["result"] if all_results else None
+
+        # --- Pre-validação de todos os remaining steps (antes do async check) ---
+        remaining_steps = steps_list[step_offset:]
+        has_previous_result = last_result is not None
+        for step_def in remaining_steps:
+            pid = step_def["plugin_id"]
+            cfg = step_def.get("config", {})
+
+            if pid not in core.registry:
+                raise HTTPException(status_code=404, detail=f"Plugin '{pid}' not found")
+
+            ptype = core.registry[pid].type.value
+            if ptype not in ("analyzer", "document", "visualizer"):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Plugin '{pid}' é tipo '{ptype}', não suportado em pipelines"
+                )
+
+            if ptype == "visualizer":
+                cfg_copy = {**cfg}
+                ofmt = "html"
+                if "output_format" in cfg_copy:
+                    ofmt = cfg_copy.pop("output_format")
+                elif "format" in cfg_copy:
+                    ofmt = cfg_copy.pop("format")
+                valid_formats = {"html", "png", "svg"}
+                if ofmt not in valid_formats:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"output_format '{ofmt}' inválido para visualizer. "
+                               f"Aceitos: {', '.join(sorted(valid_formats))}",
+                    )
+                if not has_previous_result:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"Visualizer '{pid}' requires a previous step's result as data",
+                    )
+                validate_plugin_config(core, pid, cfg_copy)
+            else:
+                validate_plugin_config(core, pid, cfg)
+                has_previous_result = True  # analyzer/document produz resultado
+
+        # --- Async check: pipeline é async por default ---
+        if remaining_steps and should_run_async(None, sync_override=sync, async_override=async_mode, is_pipeline=True):
+            manager = get_job_manager()
+            from qualia.core.jobs import Job
+
+            plugin_ids = [s["plugin_id"] for s in remaining_steps]
+            job = Job.create_pipeline(
+                plugin_ids=plugin_ids,
+                temp_files=[tmp_path] if tmp_path else [],
+            )
+            manager.store(job)
+
+            # Shared mutable state para text chaining entre step executors
+            current_text_holder = [current_text]
+            accumulated_holder = [accumulated_data]
+            last_result_holder = [last_result]
+
+            def _make_step_executor(step_def, step_global_idx):
+                """Cria closure para executar um step do pipeline."""
+                def executor(job_id):
+                    pid = step_def["plugin_id"]
+                    cfg = step_def.get("config", {})
+
+                    if pid not in core.registry:
+                        raise RuntimeError(f"Plugin '{pid}' not found")
+
+                    ptype = core.registry[pid].type.value
+
+                    if ptype == "visualizer":
+                        plugin = core.loader.get_plugin(pid)
+                        cfg = {**cfg}
+                        ofmt = cfg.pop("output_format", cfg.pop("format", "html"))
+                        viz_data = {**accumulated_holder[0]}
+                        if isinstance(last_result_holder[0], dict):
+                            viz_data.update(last_result_holder[0])
+                        viz_config = {**cfg, "output_format": ofmt}
+                        result = plugin.render(viz_data, viz_config)
+                    else:
+                        doc = core.add_document(
+                            f"api_pipeline_{pid}_{hashlib.md5(current_text_holder[0].encode()).hexdigest()[:8]}",
+                            current_text_holder[0],
+                        )
+                        result = core.execute_plugin(pid, doc, cfg)
+                        next_text = _extract_text_result(result)
+                        if next_text is not None:
+                            current_text_holder[0] = next_text
+
+                    if isinstance(result, dict):
+                        accumulated_holder[0].update(result)
+                    last_result_holder[0] = result
+                    return result
+                return executor
+
+            executors = []
+            for idx, step_def in enumerate(remaining_steps):
+                global_idx = step_offset + idx
+                executors.append(_make_step_executor(step_def, global_idx))
+
+            asyncio.get_event_loop().create_task(manager.submit_pipeline(job.id, executors))
+            await track("/pipeline", error="async")
+            return JSONResponse(
+                status_code=202,
+                content={
+                    "job_id": job.id,
+                    "status": "pending",
+                    "status_url": f"/jobs/{job.id}",
+                    "stream_url": f"/jobs/{job.id}/stream",
+                }
+            )
 
         for step_def in steps_list[step_offset:]:
             plugin_id = step_def["plugin_id"]
