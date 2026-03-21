@@ -32,6 +32,10 @@ except ImportError:
 class TranscriptionLocalPlugin(BaseDocumentPlugin):
     """Transcreve áudio/vídeo localmente via whisper.cpp."""
 
+    def __init__(self):
+        self._model = None
+        self._model_name = None
+
     def meta(self) -> PluginMetadata:
         return PluginMetadata(
             id="transcription_local",
@@ -62,6 +66,27 @@ class TranscriptionLocalPlugin(BaseDocumentPlugin):
             },
         )
 
+    def _get_model(self, model_name: str):
+        """Carrega modelo whisper.cpp, cacheando entre chamadas.
+
+        Recarrega se o modelo solicitado for diferente do cacheado.
+        """
+        if self._model is not None and self._model_name == model_name:
+            return self._model
+
+        self._model = WhisperModel(model_name)
+        self._model_name = model_name
+        return self._model
+
+    @staticmethod
+    def _format_timestamp(centiseconds: int) -> str:
+        """Converte centésimos de segundo para formato HH:MM:SS."""
+        total_seconds = centiseconds // 100
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        seconds = total_seconds % 60
+        return f"[{hours:02d}:{minutes:02d}:{seconds:02d}]"
+
     def _process_impl(
         self, document: Document, config: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
@@ -84,5 +109,44 @@ class TranscriptionLocalPlugin(BaseDocumentPlugin):
                 "pywhispercpp não instalado. Execute: pip install qualia-core[transcription-local]"
             )
 
-        # Transcrição (implementação no próximo task)
-        raise NotImplementedError("Transcrição pendente")
+        # Configuração
+        model_name = config.get("model", "large-v3")
+        language = config.get("language", "auto")
+        include_timestamps = config.get("include_timestamps", False)
+
+        # Montar kwargs do transcribe
+        transcribe_kwargs: Dict[str, Any] = {}
+        if language != "auto":
+            transcribe_kwargs["language"] = language
+
+        # Transcrever
+        try:
+            model = self._get_model(model_name)
+            segments = model.transcribe(str(file_path), **transcribe_kwargs)
+
+            # Montar texto
+            if include_timestamps:
+                lines = []
+                for seg in segments:
+                    timestamp = self._format_timestamp(seg.t0)
+                    lines.append(f"{timestamp} {seg.text.strip()}")
+                transcription = "\n".join(lines)
+            else:
+                transcription = " ".join(seg.text.strip() for seg in segments)
+
+            # Duração a partir do último segmento
+            duration = segments[-1].t1 / 100.0 if segments else 0.0
+
+            # Idioma detectado
+            detected_language = language if language != "auto" else "auto"
+
+            return {
+                "transcription": transcription,
+                "detected_language": detected_language,
+                "duration": duration,
+                "status": "completed",
+                "error": None,
+            }
+
+        except Exception as e:
+            raise RuntimeError(f"Erro na transcrição: {str(e)}") from e
