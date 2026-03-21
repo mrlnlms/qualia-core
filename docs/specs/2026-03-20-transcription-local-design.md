@@ -164,11 +164,29 @@ Instalação: `pip install qualia-core[transcription-local]`
 
 Separado do extra `[transcription]` existente (Groq).
 
-**Sistema (se necessário):**
-- ffmpeg — `brew install ffmpeg` (verificar se pywhispercpp já embute)
+**Sistema:**
+- **ffmpeg** — obrigatório, pywhispercpp NÃO embute. Instalar via `brew install ffmpeg` (macOS) ou `apt install ffmpeg` (Linux). Versão testada: 8.1.
+- **pywhispercpp** — binding Python do whisper.cpp. Versão testada: 1.4.1. Wheel pré-compilado para macOS arm64 (Apple Silicon), ~2.2MB.
 
-**Modelo:**
-- Download automático (~3GB para large-v3, uma vez, fica em cache)
+**Modelo whisper.cpp:**
+- Download automático no primeiro uso, gerenciado pelo pywhispercpp
+- Cache em disco (não re-baixa): `~/.cache/pywhispercpp/` (via platformdirs)
+- Tamanhos: tiny ~75MB, base ~142MB, small ~466MB, medium ~1.5GB, large-v3 ~3GB
+- Modelo recomendado pra teste rápido: `tiny` (~75MB, qualidade razoável)
+- Modelo recomendado pra uso real: `large-v3` (~3GB, qualidade máxima)
+
+**Setup completo do zero:**
+```bash
+# 1. ffmpeg (se não tiver)
+brew install ffmpeg
+
+# 2. pywhispercpp
+pip install pywhispercpp
+# ou via extra do qualia:
+pip install qualia-core[transcription-local]
+
+# 3. Pronto — modelo baixa sozinho no primeiro request
+```
 
 ### Testes
 
