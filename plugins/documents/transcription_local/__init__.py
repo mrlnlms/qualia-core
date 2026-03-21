@@ -45,6 +45,7 @@ class TranscriptionLocalPlugin(BaseDocumentPlugin):
             version="0.1.0",
             provides=["transcription", "detected_language", "duration"],
             requires=[],
+            heavy=True,
             parameters={
                 "model": {
                     "type": "str",
@@ -122,6 +123,14 @@ class TranscriptionLocalPlugin(BaseDocumentPlugin):
         # Transcrever
         try:
             model = self._get_model(model_name)
+
+            # Detectar idioma antes de transcrever (quando language=auto)
+            if language == "auto":
+                (detected_lang, _prob), _all_probs = model.auto_detect_language(str(file_path))
+                detected_language = detected_lang
+            else:
+                detected_language = language
+
             segments = model.transcribe(str(file_path), **transcribe_kwargs)
 
             # Montar texto
@@ -136,9 +145,6 @@ class TranscriptionLocalPlugin(BaseDocumentPlugin):
 
             # Duração a partir do último segmento
             duration = segments[-1].t1 / 100.0 if segments else 0.0
-
-            # Idioma detectado
-            detected_language = language if language != "auto" else "auto"
 
             return {
                 "transcription": transcription,

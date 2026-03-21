@@ -129,10 +129,15 @@ class TestTranscription:
         yield
         mod.HAS_PYWHISPERCPP = original
 
-    def _make_mock_model(self, segments):
+    def _make_mock_model(self, segments, detected_lang="auto", lang_prob=0.95):
         """Cria mock do WhisperModel que retorna segmentos configurados."""
+        import numpy as np
         mock_model = MagicMock()
         mock_model.transcribe.return_value = segments
+        mock_model.auto_detect_language.return_value = (
+            (detected_lang, np.float32(lang_prob)),
+            {detected_lang: np.float32(lang_prob)},
+        )
         return mock_model
 
     def _make_segment(self, t0, t1, text):
@@ -259,7 +264,7 @@ class TestTranscription:
     @patch("plugins.documents.transcription_local.WhisperModel")
     def test_transcription_error(self, mock_model_cls, plugin, doc_with_file):
         """Erro no whisper.cpp → RuntimeError."""
-        mock_model = MagicMock()
+        mock_model = self._make_mock_model([])
         mock_model.transcribe.side_effect = Exception("Failed to decode audio")
         mock_model_cls.return_value = mock_model
 
@@ -326,3 +331,102 @@ class TestCoreIntegration:
         from plugins.documents.transcription_local import TranscriptionLocalPlugin
         local_provides = set(TranscriptionLocalPlugin().meta().provides)
         assert groq_provides == local_provides
+
+    def test_meta_heavy_true(self):
+        """Plugin local declara heavy=True (transcrição é pesada)."""
+        from plugins.documents.transcription_local import TranscriptionLocalPlugin
+        assert TranscriptionLocalPlugin().meta().heavy is True
+
+
+# ============================================================================
+# Detecção automática de idioma
+# ============================================================================
+
+class TestLanguageDetection:
+    """Testes de auto_detect_language do pywhispercpp."""
+
+    @pytest.fixture(autouse=True)
+    def _enable_pywhispercpp(self):
+        import plugins.documents.transcription_local as mod
+        original = mod.HAS_PYWHISPERCPP
+        mod.HAS_PYWHISPERCPP = True
+        yield
+        mod.HAS_PYWHISPERCPP = original
+
+    def _make_mock_model(self, segments, detected_lang="pt", lang_prob=0.95):
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = segments
+        import numpy as np
+        mock_model.auto_detect_language.return_value = (
+            (detected_lang, np.float32(lang_prob)),
+            {detected_lang: np.float32(lang_prob)},
+        )
+        return mock_model
+
+    def _make_segment(self, t0, t1, text):
+        seg = MagicMock()
+        seg.t0 = t0
+        seg.t1 = t1
+        seg.text = text
+        return seg
+
+    @patch("plugins.documents.transcription_local.WhisperModel")
+    def test_auto_language_returns_detected(self, mock_model_cls, plugin, doc_with_file):
+        """language=auto retorna idioma real detectado, não 'auto'."""
+        segments = [self._make_segment(0, 500, " Olá teste.")]
+        mock_model = self._make_mock_model(segments, detected_lang="pt", lang_prob=0.97)
+        mock_model_cls.return_value = mock_model
+
+        result = plugin._process_impl(doc_with_file, {
+            "model": "tiny",
+            "language": "auto",
+            "include_timestamps": False,
+        }, {})
+
+        assert result["detected_language"] == "pt"
+        assert result["detected_language"] != "auto"
+        mock_model.auto_detect_language.assert_called_once()
+
+    @patch("plugins.documents.transcription_local.WhisperModel")
+    def test_explicit_language_skips_detection(self, mock_model_cls, plugin, doc_with_file):
+        """language=pt não chama auto_detect_language."""
+        segments = [self._make_segment(0, 500, " Olá teste.")]
+        mock_model = self._make_mock_model(segments)
+        mock_model_cls.return_value = mock_model
+
+        result = plugin._process_impl(doc_with_file, {
+            "model": "tiny",
+            "language": "pt",
+            "include_timestamps": False,
+        }, {})
+
+        assert result["detected_language"] == "pt"
+        mock_model.auto_detect_language.assert_not_called()
+
+
+# ============================================================================
+# Limite de upload por plugin (rota /transcribe)
+# ============================================================================
+
+class TestUploadLimit:
+    """Limite de upload deve ser diferente por plugin."""
+
+    def test_transcription_local_max_size_is_engine_level(self):
+        """Plugin local usa limite de 500MB (engine-level), não 25MB do Groq."""
+        from qualia.api.routes.transcribe import get_max_upload_size
+        from qualia.core import QualiaCore
+        core = QualiaCore()
+        core.discover_plugins()
+        meta = core.registry.get("transcription_local")
+        max_size = get_max_upload_size(meta)
+        assert max_size == 500 * 1024 * 1024  # 500MB
+
+    def test_transcription_groq_max_size_is_25mb(self):
+        """Plugin Groq mantém limite de 25MB."""
+        from qualia.api.routes.transcribe import get_max_upload_size, GROQ_MAX_SIZE
+        from qualia.core import QualiaCore
+        core = QualiaCore()
+        core.discover_plugins()
+        meta = core.registry.get("transcription")
+        max_size = get_max_upload_size(meta)
+        assert max_size == GROQ_MAX_SIZE  # 25MB
