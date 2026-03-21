@@ -60,6 +60,9 @@ ml = [
 transcription = [
     "groq>=0.4.0",
 ]
+transcription-local = [
+    "pywhispercpp",
+]
 export = [
     "pandas>=2.0.0",
     "openpyxl>=3.1.0",
@@ -76,7 +79,7 @@ dev = [
     "mypy",
 ]
 all = [
-    "qualia-core[api,viz,nlp,ml,transcription,export]",
+    "qualia-core[api,viz,nlp,ml,transcription,transcription-local,export]",
 ]
 
 [project.scripts]
