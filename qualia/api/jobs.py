@@ -6,6 +6,8 @@ import threading
 from datetime import datetime, timezone
 from typing import Any
 
+import httpx
+
 from qualia.core.jobs import Job, JobStatus, JobType
 
 logger = logging.getLogger(__name__)
@@ -164,6 +166,7 @@ class JobManager:
                     job.completed_at = datetime.now(timezone.utc)
         finally:
             await self._notify_job(job_id)
+            await self._dispatch_webhook(job_id)
             await self._process_pending_queue()
             self._cleanup_temp_files_if_terminal(job_id)
 
@@ -211,6 +214,7 @@ class JobManager:
                 job.completed_at = datetime.now(timezone.utc)
         finally:
             await self._notify_job(job_id)
+            await self._dispatch_webhook(job_id)
             await self._process_pending_queue()
             self._cleanup_temp_files_if_terminal(job_id)
 
@@ -251,3 +255,50 @@ class JobManager:
                 os.unlink(path)
             except OSError:
                 pass
+
+    # --- Webhook ---
+
+    async def _dispatch_webhook(self, job_id: str) -> None:
+        """Envia webhook callback se configurado."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or not job.callback_url or not job.status.is_terminal:
+                return
+            payload = self._build_webhook_payload(job)
+            url = job.callback_url
+
+        delays = [0, 1, 5]  # tentativa imediata + 2 retries
+        for attempt, delay in enumerate(delays):
+            if delay:
+                await asyncio.sleep(delay)
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    resp = await client.post(url, json=payload)
+                    if resp.status_code < 400:
+                        logger.info(f"Webhook delivered for job {job_id}")
+                        return
+                    logger.warning(f"Webhook attempt {attempt+1} failed: HTTP {resp.status_code}")
+            except Exception as e:
+                logger.warning(f"Webhook attempt {attempt+1} failed: {e}")
+
+        logger.error(f"Webhook delivery failed after 3 attempts for job {job_id}")
+
+    def _build_webhook_payload(self, job: Job) -> dict:
+        payload = {
+            "job_id": job.id,
+            "type": job.type.value,
+            "status": job.status.value,
+            "plugin_id": job.plugin_id,
+            "completed_at": job.completed_at.isoformat() if job.completed_at else None,
+        }
+        if job.type == JobType.single:
+            payload["result"] = job.result
+        else:
+            payload["steps_executed"] = job.total_steps
+            payload["results"] = [
+                {"plugin_id": s.plugin_id, "result": s.result}
+                for s in job.steps
+            ]
+        if job.status == JobStatus.failed:
+            payload["error"] = job.error
+        return payload

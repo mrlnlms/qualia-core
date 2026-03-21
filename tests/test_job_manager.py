@@ -3,6 +3,7 @@ import asyncio
 import os
 import tempfile
 import time
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -289,3 +290,57 @@ class TestJobManagerSSE:
 
         with pytest.raises(asyncio.TimeoutError):
             await asyncio.wait_for(qa.get(), timeout=0.1)
+
+
+class TestJobManagerWebhook:
+    @pytest.mark.asyncio
+    async def test_webhook_called_on_completion(self, manager):
+        """Webhook é chamado quando job completa."""
+        job = Job.create_single(
+            plugin_id="sentiment",
+            callback_url="http://localhost:9000/hook",
+        )
+        manager.store(job)
+
+        with patch("qualia.api.jobs.httpx.AsyncClient") as mock_client_cls:
+            mock_client = AsyncMock()
+            mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+            mock_client.__aexit__ = AsyncMock(return_value=None)
+            mock_client.post = AsyncMock()
+            mock_client_cls.return_value = mock_client
+
+            def executor(job_id):
+                return {"score": 0.85}
+
+            await manager.submit(job.id, executor)
+
+            for _ in range(50):
+                if manager.get(job.id).status.is_terminal:
+                    break
+                await asyncio.sleep(0.05)
+
+            # Dá tempo pro webhook ser disparado
+            await asyncio.sleep(0.1)
+            mock_client.post.assert_called_once()
+            call_args = mock_client.post.call_args
+            assert call_args[0][0] == "http://localhost:9000/hook"
+
+    @pytest.mark.asyncio
+    async def test_no_webhook_without_callback_url(self, manager):
+        """Sem callback_url, webhook não é chamado."""
+        job = Job.create_single(plugin_id="sentiment")
+        manager.store(job)
+
+        with patch("qualia.api.jobs.httpx.AsyncClient") as mock_client_cls:
+            def executor(job_id):
+                return {"score": 0.85}
+
+            await manager.submit(job.id, executor)
+
+            for _ in range(50):
+                if manager.get(job.id).status.is_terminal:
+                    break
+                await asyncio.sleep(0.05)
+
+            await asyncio.sleep(0.1)
+            mock_client_cls.assert_not_called()
