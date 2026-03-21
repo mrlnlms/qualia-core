@@ -83,3 +83,97 @@ export function createMonitorStream(onMessage, onError) {
   source.onerror = onError;
   return source;
 }
+
+// --- Async Job Support ---
+
+export function fetchJob(jobId) {
+  return request(`/jobs/${jobId}`);
+}
+
+export function fetchJobs(params = {}) {
+  const query = new URLSearchParams(params).toString();
+  return request(`/jobs${query ? '?' + query : ''}`);
+}
+
+export function cancelJob(jobId) {
+  return request(`/jobs/${jobId}`, { method: 'DELETE' });
+}
+
+/**
+ * Executes a request that may return sync (200) or async (202).
+ * For 202, opens SSE stream and waits for completion.
+ * Uses fetch() directly to preserve HTTP status code.
+ *
+ * @param {string} url - API endpoint
+ * @param {object} options - fetch options (method, headers, body)
+ * @param {object} callbacks - { onProgress }
+ * @returns {Promise} resolves with result data
+ */
+export async function executeWithJobSupport(url, options = {}, { onProgress } = {}) {
+  const res = await fetch(`${BASE}${url}`, options);
+  const data = await res.json();
+
+  if (!res.ok) {
+    throw { message: data.detail || data.message || `Request failed: ${res.status}` };
+  }
+
+  // Sync — return directly
+  if (res.status === 200) {
+    return data;
+  }
+
+  // Async — open SSE and wait for completion
+  if (res.status === 202) {
+    const { job_id, stream_url } = data;
+    return new Promise((resolve, reject) => {
+      const eventSource = new EventSource(`${BASE}${stream_url}`);
+      let fallbackTimer = null;
+
+      const startPollingFallback = () => {
+        eventSource.close();
+        fallbackTimer = setInterval(async () => {
+          try {
+            const resp = await request(`/jobs/${job_id}`);
+            if (onProgress) onProgress(resp);
+            if (resp.status === 'completed') {
+              clearInterval(fallbackTimer);
+              resolve(resp.result);
+            } else if (resp.status === 'failed') {
+              clearInterval(fallbackTimer);
+              reject(new Error(resp.error || 'Job failed'));
+            }
+          } catch (e) {
+            clearInterval(fallbackTimer);
+            reject(e);
+          }
+        }, 3000);
+      };
+
+      eventSource.addEventListener('status', (e) => {
+        const ev = JSON.parse(e.data);
+        if (onProgress) onProgress(ev);
+      });
+
+      eventSource.addEventListener('step', (e) => {
+        const ev = JSON.parse(e.data);
+        if (onProgress) onProgress(ev);
+      });
+
+      eventSource.addEventListener('completed', (e) => {
+        const ev = JSON.parse(e.data);
+        eventSource.close();
+        if (ev.status === 'completed') {
+          resolve(ev.result);
+        } else {
+          reject(new Error(ev.error || `Job ${ev.status}`));
+        }
+      });
+
+      eventSource.onerror = () => {
+        startPollingFallback();
+      };
+    });
+  }
+
+  return data;
+}
