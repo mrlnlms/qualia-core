@@ -30,7 +30,10 @@ class TestPluginInfoHeavy:
         resp = client.get("/plugins")
         assert resp.status_code == 200
         plugins = resp.json()
-        # All existing plugins should have heavy: false
+        heavy_plugins = {"transcription_local"}
         for plugin in plugins:
             assert "heavy" in plugin
-            assert plugin["heavy"] is False
+            if plugin["id"] in heavy_plugins:
+                assert plugin["heavy"] is True
+            else:
+                assert plugin["heavy"] is False

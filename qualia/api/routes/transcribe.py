@@ -12,8 +12,20 @@ from qualia.api.routing import should_run_async
 
 router = APIRouter()
 
-# Limite de transcrição (Groq API: 25MB) — separado do limite global de upload
-TRANSCRIPTION_MAX_SIZE = 25 * 1024 * 1024
+# Limites de upload por contexto
+GROQ_MAX_SIZE = 25 * 1024 * 1024       # Groq API: 25MB
+ENGINE_MAX_SIZE = 500 * 1024 * 1024     # Engine-level: 500MB (plugins locais)
+
+
+def get_max_upload_size(meta) -> int:
+    """Retorna limite de upload baseado no plugin.
+
+    Plugins locais (sem API externa) usam o limite do engine (500MB).
+    Plugin Groq mantém 25MB (limitação da API).
+    """
+    if meta and meta.id != "transcription":
+        return ENGINE_MAX_SIZE
+    return GROQ_MAX_SIZE
 
 
 @router.post("/transcribe/{plugin_id}")
@@ -52,7 +64,8 @@ async def transcribe(
     validate_plugin_config(core, plugin_id, config_dict)
 
     suffix = Path(file.filename).suffix if file.filename else ""
-    upload = await check_upload_size(file, max_size=TRANSCRIPTION_MAX_SIZE, suffix=suffix)
+    max_size = get_max_upload_size(meta)
+    upload = await check_upload_size(file, max_size=max_size, suffix=suffix)
     tmp_path = upload.tmp_path
 
     try:

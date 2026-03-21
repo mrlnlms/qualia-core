@@ -882,9 +882,9 @@ class TestUploadSizeLimit:
     """
 
     def test_transcribe_file_too_large_returns_413(self, client, monkeypatch):
-        """Upload > TRANSCRIPTION_MAX_SIZE em transcribe retorna 413."""
+        """Upload > GROQ_MAX_SIZE em transcribe retorna 413."""
         import qualia.api.routes.transcribe as transcribe_mod
-        monkeypatch.setattr(transcribe_mod, "TRANSCRIPTION_MAX_SIZE", 1024)
+        monkeypatch.setattr(transcribe_mod, "GROQ_MAX_SIZE", 1024)
         fake_content = b"\x00" * 1025
         response = client.post(
             "/transcribe/transcription",
