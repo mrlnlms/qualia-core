@@ -229,3 +229,63 @@ class TestJobManagerExecution:
 
         assert manager.get(j1.id).status == JobStatus.completed
         assert manager.get(j2.id).status == JobStatus.completed
+
+
+class TestJobManagerSSE:
+    @pytest.mark.asyncio
+    async def test_subscribe_receives_events(self, manager):
+        """Subscriber recebe eventos do job."""
+        job = Job.create_single(plugin_id="sentiment")
+        manager.store(job)
+
+        queue = await manager.subscribe(job.id)
+        assert queue is not None
+
+        # Simula notificação
+        await manager._notify_job(job.id)
+
+        event = await asyncio.wait_for(queue.get(), timeout=1.0)
+        assert event is not None
+        assert "status" in event
+
+    @pytest.mark.asyncio
+    async def test_unsubscribe_removes_queue(self, manager):
+        """Unsubscribe remove a queue do job."""
+        job = Job.create_single(plugin_id="sentiment")
+        manager.store(job)
+
+        queue = await manager.subscribe(job.id)
+        await manager.unsubscribe(job.id, queue)
+
+        async with manager._streams_lock:
+            assert job.id not in manager._streams or queue not in manager._streams[job.id]
+
+    @pytest.mark.asyncio
+    async def test_two_subscribers_same_job(self, manager):
+        """Dois subscribers recebem o mesmo evento."""
+        job = Job.create_single(plugin_id="sentiment")
+        manager.store(job)
+
+        q1 = await manager.subscribe(job.id)
+        q2 = await manager.subscribe(job.id)
+
+        await manager._notify_job(job.id)
+
+        e1 = await asyncio.wait_for(q1.get(), timeout=1.0)
+        e2 = await asyncio.wait_for(q2.get(), timeout=1.0)
+        assert e1 == e2
+
+    @pytest.mark.asyncio
+    async def test_subscriber_only_gets_own_job_events(self, manager):
+        """Subscriber do job A não recebe eventos do job B."""
+        ja = Job.create_single(plugin_id="a")
+        jb = Job.create_single(plugin_id="b")
+        manager.store(ja)
+        manager.store(jb)
+
+        qa = await manager.subscribe(ja.id)
+
+        await manager._notify_job(jb.id)
+
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(qa.get(), timeout=0.1)

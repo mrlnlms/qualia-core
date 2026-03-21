@@ -22,11 +22,49 @@ class JobManager:
         self._streams: dict[str, set[asyncio.Queue]] = {}
         self._streams_lock = asyncio.Lock()
 
-    # --- Stub for notify (implemented in Task 5) ---
+    # --- SSE Pub/Sub ---
+
+    async def subscribe(self, job_id: str) -> asyncio.Queue | None:
+        """Cria uma queue para receber eventos de um job."""
+        job = self.get(job_id)
+        if not job:
+            return None
+        queue: asyncio.Queue = asyncio.Queue()
+        async with self._streams_lock:
+            if job_id not in self._streams:
+                self._streams[job_id] = set()
+            self._streams[job_id].add(queue)
+        return queue
+
+    async def unsubscribe(self, job_id: str, queue: asyncio.Queue) -> None:
+        """Remove uma queue de subscriber."""
+        async with self._streams_lock:
+            if job_id in self._streams:
+                self._streams[job_id].discard(queue)
+                if not self._streams[job_id]:
+                    del self._streams[job_id]
 
     async def _notify_job(self, job_id: str) -> None:
-        """Envia estado do job para subscribers SSE. Stub até Task 5."""
-        pass
+        """Envia estado atual do job para todos os subscribers."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job:
+                return
+            # Build event with type matching spec: status, step, completed
+            event = job.to_dict()
+            if job.status in (JobStatus.completed, JobStatus.failed, JobStatus.cancelled):
+                event["_event_type"] = "completed"
+            elif job.type == JobType.pipeline and any(s.status == JobStatus.running for s in job.steps):
+                event["_event_type"] = "step"
+            else:
+                event["_event_type"] = "status"
+        async with self._streams_lock:
+            queues = self._streams.get(job_id, set()).copy()
+        for queue in queues:
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                pass  # drop event se queue cheia
 
     def store(self, job: Job) -> None:
         with self._lock:
