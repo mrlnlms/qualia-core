@@ -2,7 +2,9 @@
 
 O Qualia possui transcrição local via whisper.cpp, transcrição via Groq e um plugin estruturado integrado à API/interface. As seções de rodadas e ensaios abaixo registram a evolução histórica; o contrato atual está descrito a seguir.
 
-Status consolidado, configuração aprovada e limites de validação: [TRANSCRIPTION_STATUS.md](TRANSCRIPTION_STATUS.md). Referência atual: v9, pronta para validar entrevistas novas; novo upload integral com as políticas finais ainda não executado.
+Status consolidado, configuração aprovada e limites de validação: [TRANSCRIPTION_STATUS.md](TRANSCRIPTION_STATUS.md). Referência atual: v9, validada por dois novos uploads integrais com as políticas finais. A comparação da gravação maior trouxe achados de qualidade ainda sem confirmação no áudio; aprovação estrutural não equivale a precisão integral.
+
+Encerramento solicitado pelo usuário em 15/10/2026: documentação e commit, sem novos ajustes/testes. A apresentação da comparação foi considerada difícil por diferenças de timestamps e de recorte. Embora os cálculos recentes usem sequência de palavras, a correspondência exibida e os percentuais não constituem um parâmetro de qualidade aprovado. Ler a ressalva e os links no status antes de propor outra rodada.
 
 ## Entrega automática com participantes completos
 
