@@ -1,7 +1,8 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { plugins, pluginsByType, navigate } from '../lib/stores.js';
-  import { fetchPluginSchema, transcribe } from '../lib/api.js';
+  import { fetchPluginSchema, transcribe, loadTranscriptionJob } from '../lib/api.js';
+  import { downloadTranscript, auditDownload } from '../lib/transcript-download.js';
   import ParamForm from '../components/ParamForm.svelte';
   import FileUpload from '../components/FileUpload.svelte';
   import { typeConfig } from '../lib/constants.js';
@@ -30,8 +31,23 @@
     try {
       const s = await fetchPluginSchema(pluginId);
       schema = s.parameters || s;
+      const jobId = new URLSearchParams(window.location.search).get('job');
+      if (jobId) {
+        loading = true;
+        startTimer('Opening transcription...');
+        result = await loadTranscriptionJob(pluginId, jobId, { onProgress: showProgress });
+        const settings = result.result?.provenance?.configuration;
+        if (settings && schema.recover_speakers) {
+          configValues = { ...configValues, language: settings.language, device: settings.device,
+            speech_boundaries: !!settings.speech_boundary_policy,
+            recover_speakers: !!settings.speaker_recovery_policy };
+        }
+      }
     } catch (e) {
       error = e.message || 'Failed to load plugin schema';
+    } finally {
+      stopTimer();
+      loading = false;
     }
   });
 
@@ -49,6 +65,15 @@
     loadingStatus = '';
   }
 
+  function showProgress(job) {
+    loadingStatus = job.status === 'pending' ? 'Queued — waiting to transcribe...' : 'Processing audio...';
+    if (job.id) {
+      const url = new URL(window.location.href);
+      url.searchParams.set('job', job.id);
+      window.history.replaceState(null, '', url);
+    }
+  }
+
   async function runTranscription() {
     if (!pluginId || !file) return;
     loading = true;
@@ -56,7 +81,7 @@
     result = null;
     startTimer('Uploading and transcribing...');
     try {
-      result = await transcribe(pluginId, file, configValues);
+      result = await transcribe(pluginId, file, configValues, { onProgress: showProgress });
     } catch (e) {
       error = typeof e.message === 'string' ? e.message : JSON.stringify(e.message);
     } finally {
@@ -153,8 +178,8 @@
 
         {#if schema}
           <div class="field">
-            <label class="field-label">file</label>
-            <FileUpload bind:file accept={AUDIO_ACCEPT} />
+            <label class="field-label" for="transcribe-file">file</label>
+            <FileUpload id="transcribe-file" bind:file accept={AUDIO_ACCEPT} maxSize={(pluginId === 'transcription' ? 25 : 500) * 1024 * 1024} />
           </div>
 
           <div class="field">
@@ -194,12 +219,31 @@
                 {copied ? 'copied' : 'copy'}
               </button>
             </div>
-            {#if result.result.language || result.result.duration}
+            {#if result.result.detected_language || result.result.language || result.result.duration}
               <div class="result-meta">
-                {#if result.result.language}<span class="meta-item">{result.result.language}</span>{/if}
+                {#if result.result.detected_language || result.result.language}<span class="meta-item">{result.result.detected_language || result.result.language}</span>{/if}
                 {#if result.result.duration}<span class="meta-item">{result.result.duration.toFixed(1)}s</span>{/if}
                 {#if result.filename}<span class="meta-item">{result.filename}</span>{/if}
               </div>
+            {/if}
+            {#if result.result.exports}
+              <div class="download-bar">
+                {#each Object.entries(result.result.exports) as [format, artifact]}
+                  <button class="copy-btn" onclick={() => downloadTranscript(artifact)}>Download {format.toUpperCase()}</button>
+                {/each}
+                <button class="copy-btn" onclick={() => downloadTranscript(auditDownload(result.result))}>Download audit JSON</button>
+              </div>
+              <p class="review-note">
+                Speakers are automatic labels, not verified identities.
+                {result.result.review?.length || 0} words flagged for review.
+                {#if result.result.words?.some(w => w.flags?.includes('speaker_inferred'))}
+                  {result.result.words.filter(w => w.flags?.includes('speaker_inferred')).length} speaker labels inferred or reconciled; check the audit JSON.
+                {/if}
+                {#if result.result.quality_audit?.internal_repetitions?.length || result.result.quality_audit?.repeated_segment_runs?.length}
+                  Repetition detected: check these passages against the audio.
+                {/if}
+                Download the files before leaving this page.
+              </p>
             {/if}
             <textarea class="transcription-text" readonly value={result.result.transcription}></textarea>
           </div>
@@ -423,6 +467,8 @@
   .copy-btn.copied { border-color: var(--accent-green); color: var(--accent-green); }
 
   .result-meta { display: flex; gap: 12px; padding: 8px 16px; border-bottom: 1px solid var(--border-subtle); }
+  .download-bar { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 16px; }
+  .review-note { padding: 0 16px 12px; font-size: 0.78em; line-height: 1.6; color: var(--text-secondary); }
   .meta-item { font-size: 0.72em; font-family: var(--font-mono); color: var(--text-muted); }
 
   .transcription-text {

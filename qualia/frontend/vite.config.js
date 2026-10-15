@@ -9,6 +9,7 @@ export default defineConfig({
       '/plugins': 'http://localhost:8000',
       '/analyze': 'http://localhost:8000',
       '/transcribe': 'http://localhost:8000',
+      '/jobs': 'http://localhost:8000',
       '/visualize': 'http://localhost:8000',
       '/process': 'http://localhost:8000',
       '/pipeline': 'http://localhost:8000',

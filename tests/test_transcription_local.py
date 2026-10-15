@@ -224,8 +224,8 @@ class TestTranscription:
         assert call_kwargs.kwargs.get("language") == "pt"
 
     @patch("plugins.documents.transcription_local.WhisperModel")
-    def test_model_cached_between_calls(self, mock_model_cls, plugin, doc_with_file):
-        """Modelo é carregado uma vez e cacheado."""
+    def test_model_is_fresh_between_calls(self, mock_model_cls, plugin, doc_with_file):
+        """Cada gravação recebe uma instância e não herda contexto textual."""
         mock_model = self._make_mock_model([])
         mock_model_cls.return_value = mock_model
 
@@ -240,7 +240,11 @@ class TestTranscription:
             "include_timestamps": False,
         }, {})
 
-        assert mock_model_cls.call_count == 1
+        assert mock_model_cls.call_count == 2
+        for call in mock_model_cls.call_args_list:
+            assert call.kwargs['no_context'] is True
+            assert call.kwargs['n_max_text_ctx'] == 0
+            assert call.kwargs['params_sampling_strategy'] == 0
 
     @patch("plugins.documents.transcription_local.WhisperModel")
     def test_model_reloaded_on_change(self, mock_model_cls, plugin, doc_with_file):

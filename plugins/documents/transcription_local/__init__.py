@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from qualia.core import BaseDocumentPlugin, PluginMetadata, PluginType, Document
+from qualia.transcription.decoder import decoder_params
 
 # Importação guarded — plugin funciona sem pywhispercpp instalado
 try:
@@ -31,10 +32,6 @@ except ImportError:
 
 class TranscriptionLocalPlugin(BaseDocumentPlugin):
     """Transcreve áudio/vídeo localmente via whisper.cpp."""
-
-    def __init__(self):
-        self._model = None
-        self._model_name = None
 
     def meta(self) -> PluginMetadata:
         return PluginMetadata(
@@ -68,16 +65,10 @@ class TranscriptionLocalPlugin(BaseDocumentPlugin):
         )
 
     def _get_model(self, model_name: str):
-        """Carrega modelo whisper.cpp, cacheando entre chamadas.
-
-        Recarrega se o modelo solicitado for diferente do cacheado.
-        """
-        if self._model is not None and self._model_name == model_name:
-            return self._model
-
-        self._model = WhisperModel(model_name)
-        self._model_name = model_name
-        return self._model
+        """Instância por gravação, sem estado textual/amostragem de outra chamada."""
+        return WhisperModel(model_name, params_sampling_strategy=0, n_threads=4,
+                            print_progress=False, print_realtime=False,
+                            redirect_whispercpp_logs_to=None, **decoder_params())
 
     @staticmethod
     def _format_timestamp(centiseconds: int) -> str:

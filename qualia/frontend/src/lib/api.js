@@ -54,11 +54,15 @@ export async function analyzeFile(pluginId, file, config = {}) {
   return request(`/analyze/${pluginId}/file`, { method: 'POST', body: form });
 }
 
-export async function transcribe(pluginId, file, config = {}) {
+export async function transcribe(pluginId, file, config = {}, callbacks = {}) {
   const form = new FormData();
   form.append('file', file);
   form.append('config', JSON.stringify(config));
-  return request(`/transcribe/${pluginId}`, { method: 'POST', body: form });
+  const response = await executeWithJobSupport(`/transcribe/${pluginId}`, { method: 'POST', body: form }, callbacks);
+  // Sync returns an envelope; jobs return the plugin result directly.
+  return response?.status === 'success' && response.result
+    ? response
+    : { status: 'success', plugin_id: pluginId, filename: file.name, result: response };
 }
 
 export async function executePipeline(steps, { text, file } = {}) {
@@ -125,24 +129,50 @@ export async function executeWithJobSupport(url, options = {}, { onProgress } = 
   // Async — open SSE and wait for completion
   if (res.status === 202) {
     const { job_id, stream_url } = data;
-    return new Promise((resolve, reject) => {
+    return watchJob(job_id, stream_url, { onProgress });
+  }
+
+  return data;
+}
+
+/** Reopen an existing transcription without submitting another upload. */
+export async function loadTranscriptionJob(pluginId, jobId, callbacks = {}) {
+  const id = encodeURIComponent(jobId);
+  const job = await fetchJob(id);
+  if (job.plugin_id !== pluginId) throw new Error('This job belongs to a different transcriber.');
+  const result = await watchJob(id, `/jobs/${id}/stream`, callbacks);
+  return { status: 'success', plugin_id: pluginId, result };
+}
+
+function watchJob(job_id, stream_url, { onProgress } = {}) {
+  return new Promise((resolve, reject) => {
       const eventSource = new EventSource(`${BASE}${stream_url}`);
       let fallbackTimer = null;
+      let settled = false;
+
+      const finish = (event) => {
+        if (settled) return true;
+        if (onProgress) onProgress(event);
+        if (!['completed', 'failed', 'cancelled'].includes(event.status)) return false;
+        settled = true;
+        eventSource.close();
+        clearInterval(fallbackTimer);
+        if (event.status === 'completed') resolve(event.result);
+        else reject(new Error(event.error || `Job ${event.status}`));
+        return true;
+      };
 
       const startPollingFallback = () => {
+        if (settled || fallbackTimer) return;
         eventSource.close();
         fallbackTimer = setInterval(async () => {
+          if (settled) return;
           try {
             const resp = await request(`/jobs/${job_id}`);
-            if (onProgress) onProgress(resp);
-            if (resp.status === 'completed') {
-              clearInterval(fallbackTimer);
-              resolve(resp.result);
-            } else if (resp.status === 'failed') {
-              clearInterval(fallbackTimer);
-              reject(new Error(resp.error || 'Job failed'));
-            }
+            finish(resp);
           } catch (e) {
+            if (settled) return;
+            settled = true;
             clearInterval(fallbackTimer);
             reject(e);
           }
@@ -151,29 +181,27 @@ export async function executeWithJobSupport(url, options = {}, { onProgress } = 
 
       eventSource.addEventListener('status', (e) => {
         const ev = JSON.parse(e.data);
-        if (onProgress) onProgress(ev);
+        finish(ev);
       });
 
       eventSource.addEventListener('step', (e) => {
         const ev = JSON.parse(e.data);
-        if (onProgress) onProgress(ev);
+        finish(ev);
       });
 
       eventSource.addEventListener('completed', (e) => {
         const ev = JSON.parse(e.data);
-        eventSource.close();
-        if (ev.status === 'completed') {
-          resolve(ev.result);
-        } else {
-          reject(new Error(ev.error || `Job ${ev.status}`));
-        }
+        finish(ev);
       });
 
       eventSource.onerror = () => {
         startPollingFallback();
       };
-    });
-  }
 
-  return data;
+      // A fast/cached job can finish before SSE subscribes. Read current state
+      // after attaching listeners so that the terminal event cannot be missed.
+      const refresh = () => request(`/jobs/${job_id}`).then(finish).catch(startPollingFallback);
+      eventSource.onopen = refresh;
+      refresh();
+  });
 }
