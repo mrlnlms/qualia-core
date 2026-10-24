@@ -2,6 +2,15 @@
 
 Motor de análise qualitativa. API REST local stateless — recebe texto/áudio/vídeo, devolve JSON. Qualia não sabe o que os dados significam; quem interpreta é o consumer.
 
+## Começar por aqui
+
+Ler [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) para a visão geral atual,
+as pendências observadas, a ordem sugerida e as evidências. O backlog e os mapas
+de março contêm propostas históricas e itens já implementados; conferir o código
+e os encerramentos antes de tratar algo como trabalho aberto. A revisão de
+24/10/2026 registrou CI com falha e uma possível lacuna Workflow/jobs; não
+confundir publicação do Git com validação completa da versão.
+
 ## Retomada da transcrição estruturada
 
 Antes de continuar essa frente, ler `docs/TRANSCRIPTION_STATUS.md`, depois `docs/TRANSCRIPTION_BENCHMARK.md`. No checkout com os dados privados, ler também `local-transcript-benchmark/CONTINUIDADE-2026-10-15.md` e `EXECUTION-STATUS.json`. A implementação de referência é a v9, no commit `671df37`; os dois áudios novos já foram processados integralmente. O usuário pediu encerrar com documentação/commit, sem novos ajustes ou execuções. A apresentação da comparação com Dovetail foi considerada difícil de conferir por diferenças de timestamps; o critério de qualidade permanece inconclusivo. Não retomar modelos/testes automaticamente: aguardar novo pedido e liberação da máquina para trabalho pesado. `local-transcript-benchmark/` é privado e está excluído pelo `.gitignore`; os arquivos dessa pasta não acompanham o Git.

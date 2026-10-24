@@ -175,6 +175,9 @@ Qualia Core é o motor. Outros projetos consomem a API:
 
 API REST + CLI + frontend web (Svelte, dark theme). CI via GitHub Actions com coverage.
 
-**Estágio atual:** Beta (v0.2.0-beta) — funcional, 851 testes, API + CLI + frontend.
+**Estágio atual:** Beta (v0.2.0-beta), com API + CLI + frontend. A visão atual,
+as evidências de validação e as pendências estão em
+[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md). Agentes devem começar por
+[AGENTS.md](AGENTS.md).
 
 MIT

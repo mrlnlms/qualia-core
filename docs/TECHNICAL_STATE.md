@@ -2,6 +2,11 @@
 
 Última atualização: 2026-03-20
 
+> Retrato técnico de março. Para as implementações posteriores e as pendências
+> observadas em 24/10/2026, começar por [PROJECT_STATUS.md](PROJECT_STATUS.md).
+> Contagens de plugins/testes e descrições de rotas abaixo precisam ser
+> conferidas contra o código atual.
+
 ## Plugins (8)
 
 | Plugin | Tipo | Deps pesadas | Loading |

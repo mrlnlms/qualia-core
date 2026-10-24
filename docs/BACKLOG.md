@@ -2,6 +2,12 @@
 
 Última atualização: 2026-03-20
 
+> Registro histórico consolidado até a data acima. Antes de planejar atividades,
+> ler [PROJECT_STATUS.md](PROJECT_STATUS.md), revisado em 24/10/2026: há
+> pendências atuais de CI e integração, o Workflow já existe e propostas de
+> arquitetura abaixo não devem ser tratadas como decisões adotadas. A frase
+> “Nenhum item pendente” refere-se ao encerramento de março.
+
 ## Pendente
 
 Nenhum item pendente.
