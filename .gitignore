@@ -22,6 +22,13 @@ build/
 # Secrets
 .env
 
+# Dados privados e ambientes do benchmark de transcrição
+/local-transcript-benchmark/
+/jsons de revisão dovetail (pasta download)/
+
+# Configuração local de ferramentas (inclui symlinks fora do projeto)
+/.antigravitycli/
+
 # Qualia específico
 cache/
 output/
@@ -31,6 +38,15 @@ results/
 docs/morto/
 data/
 *.log
+
+# Cópias locais de material aposentado; versões anteriores ficam no histórico Git
+/docs/archive/archive/morto/
+/docs/archive/archive/backups/
+
+# Rascunhos locais; não são documentação nem backlog aprovados
+/docs/archive/archive/backlog_llm_novo.md
+/docs/archive/archive/readme-produto-nao-tecnico-2026-08-14.md
+/docs/archive/archive/readme-tecnico-inferido-2026-08-14.md
 
 # Frontend
 qualia/frontend/node_modules/
