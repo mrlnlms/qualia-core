@@ -4,7 +4,7 @@
         run-api frontend-install frontend-dev frontend-build \
         docker-build docker-run clean
 
-PYTHON := python3
+PYTHON := .venv/bin/python
 
 help: ## Mostra esta mensagem de ajuda
 	@echo "Qualia Core - Comandos Disponíveis"
